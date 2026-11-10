@@ -1296,19 +1296,43 @@ window.getSourceTag = getSourceTag;
 
 
 
-// Helper for loose image paths
+// 封面地址：kw/kg 搜索结果的 img 恒为 null（与 FMusic 一样需调用音源 getPic 单独解析）。
+// 统一交给服务端 /api/music/cover：后端调用 SDK getPic 解析封面，并把 CDN 返回的
+// http 图片转成同源响应，避免 https 页面下被浏览器 mixed-content 拦截或 CDN 防盗链。
 function getImgUrl(item) {
     if (!item) return '/music/assets/logo.svg';
     const s = item;
-    // 优先从标准 meta 获取
-    if (s.meta && s.meta.picUrl) return s.meta.picUrl;
-    // 兼容各种 SDK 的原始字段
-    return s.img || s.pic || s.picUrl || s.picture ||
+    const direct = (s.meta && s.meta.picUrl) || s.img || s.pic || s.picUrl || s.picture ||
         (s.album && (s.album.picUrl || s.album.img || s.album.pic)) ||
         (s.al && (s.al.picUrl || s.al.img)) ||
-        (s.meta && (s.meta.img || s.meta.pic)) ||
-        '/music/assets/logo.svg';
+        (s.meta && (s.meta.img || s.meta.pic)) || null;
+    const hasDirect = direct && /^https?:\/\//i.test(direct);
+    const source = String(s.source || (s.meta && s.meta.source) || '').toLowerCase();
+
+    // 酷狗/酷我以及任何没有现成封面的歌曲，走服务端解析 + 代理
+    const needsPic = !hasDirect || source === 'kw' || source === 'kg';
+    if (!needsPic) return direct;
+    if (!source || (!s.songmid && !s.id && !(s.meta && s.meta.songId) && !s.hash)) {
+        return '/music/assets/logo.svg';
+    }
+
+    const p = new URLSearchParams();
+    const put = (k, v) => {
+        if (v === undefined || v === null) return;
+        const str = String(v);
+        if (str && str !== 'null' && str !== 'undefined') p.set(k, str);
+    };
+    put('source', source);
+    // 优先原始 songmid；标准化对象的 id 形如 kw_118990 / 339589_<hash>，后端会还原
+    put('songmid', s.songmid || (s.meta && s.meta.songId) || s.id || '');
+    put('hash', s.hash || (s.meta && s.meta.hash) || '');
+    put('albumId', s.albumId || (s.meta && s.meta.albumId) || (s.album && s.album.id) || '');
+    put('audioId', s.audioId || '');
+    put('name', s.name || '');
+    put('singer', s.singer || '');
+    return '/api/music/cover?' + p.toString();
 }
+window.getImgUrl = getImgUrl;
 
 // List search logic is now handled by ListSearch service in list_search.js
 function renderResults(list) {

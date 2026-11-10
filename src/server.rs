@@ -7,7 +7,7 @@ use axum::{
 };
 use futures::StreamExt;
 use serde_json::{json, Value};
-use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, Mutex}};
+use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, Mutex, OnceLock}};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -43,6 +43,9 @@ pub fn router(st: AppState) -> Router {
         .route("/api/music/hotSearch", get(music_hot_search))
         .route("/api/music/url", post(music_url))
         .route("/api/music/lyric", get(music_lyric_get).post(music_lyric_post))
+        // ---------- 封面：kw/kg 搜索结果不带封面，需调用 SDK getPic 单独解析 ----------
+        .route("/api/music/pic", get(music_pic_get).post(music_pic_post))
+        .route("/api/music/cover", get(music_cover))
         .route("/api/music/songList/tags", get(songlist_tags))
         .route("/api/music/songList/list", get(songlist_list))
         .route("/api/music/songList/detail", get(songlist_detail))
@@ -351,6 +354,190 @@ async fn music_download(State(st): State<AppState>, Query(q): Query<HashMap<Stri
         Ok(r) => r,
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+}
+
+// ============================ 封面解析（对齐 FMusic 的 getPic） ============================
+// kw/kg 的搜索结果里 img 恒为 null，封面必须调用 SDK 的 getPic 单独获取。
+// FMusic 的 PlayViewModel 正是走 jsController.pic → SDK getPic 这条链路；
+// lx-server 之前完全没有暴露 pic 能力，所以酷狗/酷我封面一直显示占位图。
+// 这里补上 pic 接口，并提供同源图片代理：CDN 返回的是 http 图片，
+// 由服务端取回转成同源响应，避免浏览器 mixed-content/防盗链导致加载失败。
+static PIC_CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+fn pic_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
+    PIC_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 从歌曲对象里取现成的封面 URL（兼容 SDK 原始字段与标准化 meta 字段）
+fn direct_pic(song: &Value) -> Option<String> {
+    for k in ["picUrl", "img", "pic", "picture"] {
+        if let Some(s) = song.get(k).and_then(|x| x.as_str()) {
+            if s.starts_with("http") { return Some(s.trim().to_string()); }
+        }
+    }
+    for p in ["/meta/picUrl", "/meta/img", "/meta/pic", "/album/picUrl", "/album/img", "/al/picUrl", "/al/img"] {
+        if let Some(s) = song.pointer(p).and_then(|x| x.as_str()) {
+            if s.starts_with("http") { return Some(s.trim().to_string()); }
+        }
+    }
+    None
+}
+
+/// SDK / 自定义音源的 pic 结果可能是裸 URL 字符串，也可能是 {url: ...}
+fn pic_from_result(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) if s.starts_with("http") => Some(s.clone()),
+        Value::Object(_) => pic_from_result(&v["url"]),
+        _ => None,
+    }
+}
+
+fn pick_str(v: &Value, keys: &[&str]) -> String {
+    for k in keys {
+        let x = v.get(*k).or_else(|| v.get("meta").and_then(|m| m.get(*k)));
+        if let Some(x) = x {
+            match x {
+                Value::String(s) if !s.is_empty() && s != "null" => return s.clone(),
+                Value::Number(n) => return n.to_string(),
+                _ => {}
+            }
+        }
+    }
+    String::new()
+}
+
+/// 把前端传来的稀疏歌曲信息补齐成 SDK getPic 需要的 musicInfo。
+/// kg 需要 hash / albumId / songmid / audioId / name / singer，kw 需要 songmid；
+/// 标准化后的歌曲 id 形如 `kw_118990` 或 `339589_<hash>`，需要还原。
+fn normalize_song(song: &Value) -> Value {
+    let source = pick_str(song, &["source"]).to_ascii_lowercase();
+    let mut songmid = pick_str(song, &["songmid", "songId", "musicId", "id"]);
+    let mut hash = pick_str(song, &["hash"]);
+    if let Some(rest) = songmid.strip_prefix("kw_") { songmid = rest.to_string(); }
+    if source == "kg" && songmid.contains('_') {
+        let mut it = songmid.splitn(2, '_');
+        let a = it.next().unwrap_or("").to_string();
+        let b = it.next().unwrap_or("").to_string();
+        songmid = a;
+        if hash.is_empty() { hash = b; }
+    }
+    if source == "kg" && songmid.len() == 32 && hash.is_empty() { hash = songmid.clone(); }
+    let audio_id = {
+        let a = pick_str(song, &["audioId"]);
+        if a.is_empty() && source == "kg" && songmid.len() == 32 { songmid.clone() } else { a }
+    };
+    json!({
+        "source": source,
+        "songmid": songmid,
+        "id": songmid,
+        "hash": hash,
+        "albumId": pick_str(song, &["albumId", "albumMid"]),
+        "audioId": audio_id,
+        "name": pick_str(song, &["name"]),
+        "singer": pick_str(song, &["singer"]),
+        "albumName": pick_str(song, &["albumName"]),
+    })
+}
+
+/// 解析封面 URL：现成字段 → 内置 SDK getPic → 自定义音源 pic action（失败兜底）。
+/// 结果按 source|songmid|hash 缓存，避免同一首歌在列表/播放页/队列里反复占用 JS 引擎。
+async fn resolve_pic_url(st: &AppState, song: &Value) -> Option<String> {
+    if let Some(u) = direct_pic(song) { return Some(u); }
+    let song = normalize_song(song);
+    let source = song["source"].as_str().unwrap_or("").to_string();
+    if source.is_empty() { return None; }
+    let key = format!("{}|{}|{}", source,
+        song["songmid"].as_str().unwrap_or(""), song["hash"].as_str().unwrap_or(""));
+    if let Some(hit) = pic_cache().lock().unwrap().get(&key) { return hit.clone(); }
+
+    let mut url = match st.js.builtin("pic", json!({"source": source, "musicInfo": song})).await {
+        Ok(v) => pic_from_result(&v),
+        Err(e) => { tracing::debug!("SDK getPic 失败 ({}): {}", source, e); None }
+    };
+    // 自定义音源也注册了 pic action 时兜底，等价于 FMusic 的 user_api 转发
+    if url.is_none() {
+        if let Some((item, _)) = st.sources.enabled_script() {
+            let supported = item.sources.is_empty() || item.sources.contains(&source);
+            if supported {
+                // 音源未注册 pic 时脚本可能一直不回结果，限定 8s 避免拖慢封面加载
+                let call = st.js.user(json!({"source": source, "action": "pic", "info": song}));
+                match tokio::time::timeout(std::time::Duration::from_secs(8), call).await {
+                    Ok(Ok(res)) => url = pic_from_result(&res["data"]).or_else(|| pic_from_result(&res)),
+                    Ok(Err(e)) => tracing::debug!("自定义音源 pic 失败 ({}): {}", source, e),
+                    Err(_) => tracing::debug!("自定义音源 pic 超时 ({})", source),
+                }
+            }
+        }
+    }
+    let url = url.filter(|u| u.starts_with("http"));
+    if let Some(u) = &url {
+        let mut c = pic_cache().lock().unwrap();
+        if c.len() > 2000 { c.clear(); }
+        c.insert(key, Some(u.clone()));
+    }
+    url
+}
+
+/// GET 参数（/api/music/cover 与 /api/music/pic 的 GET 形式共用）
+fn cover_query_song(q: &HashMap<String, String>) -> Value {
+    let mut m = serde_json::Map::new();
+    // 只接受歌曲标识字段：不接受任意 picUrl/img，避免该路由被当作开放代理 (SSRF)
+    for k in ["source", "songmid", "id", "hash", "albumId", "audioId", "name", "singer", "albumName"] {
+        if let Some(v) = q.get(k) {
+            if !v.is_empty() { m.insert(k.to_string(), json!(v)); }
+        }
+    }
+    Value::Object(m)
+}
+
+/// 返回封面 URL（JSON），对齐 FMusic 的 pic 结果语义（裸字符串 / {url}）
+async fn music_pic_get(State(st): State<AppState>, Query(q): Query<HashMap<String, String>>) -> R {
+    let song = cover_query_song(&q);
+    match resolve_pic_url(&st, &song).await {
+        Some(u) => ok(json!({"url": u})),
+        None => ok(json!({"url": Value::Null, "error": "封面获取失败"})),
+    }
+}
+async fn music_pic_post(State(st): State<AppState>, body: String) -> R {
+    let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
+    let mut song = v.get("musicInfo").or_else(|| v.get("songInfo")).cloned().unwrap_or_else(|| v.clone());
+    if !song.is_object() { song = json!({}); }
+    if song.get("source").and_then(|x| x.as_str()).unwrap_or("").is_empty() {
+        if let Some(s) = v["source"].as_str() { song["source"] = json!(s); }
+    }
+    match resolve_pic_url(&st, &song).await {
+        Some(u) => ok(json!({"url": u})),
+        None => ok(json!({"url": Value::Null, "error": "封面获取失败"})),
+    }
+}
+
+fn logo_response() -> Response {
+    let svg: &[u8] = crate::assets::web("music/assets/logo.svg").unwrap_or(
+        b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"128\" height=\"128\"></svg>");
+    ([(header::CONTENT_TYPE, "image/svg+xml".to_string()),
+      (header::CACHE_CONTROL, "public, max-age=3600".to_string())], svg.to_vec()).into_response()
+}
+
+/// 同源图片代理：解析出封面 URL 后由服务端取回字节流，
+/// 浏览器只访问本站地址，彻底规避 http 图片的 mixed-content 与 CDN 防盗链问题。
+async fn music_cover(State(st): State<AppState>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let url = match resolve_pic_url(&st, &cover_query_song(&q)).await {
+        Some(u) => u,
+        None => return logo_response(),
+    };
+    let resp = match st.http.get(&url)
+        .header(header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
+        .header(header::ACCEPT, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+        .send().await {
+        Ok(r) => r,
+        Err(e) => { tracing::debug!("封面下载失败 {}: {}", url, e); return logo_response(); }
+    };
+    if !resp.status().is_success() { return logo_response(); }
+    let ct = resp.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok())
+        .filter(|s| s.starts_with("image/")).unwrap_or("image/jpeg").to_string();
+    let bytes = match resp.bytes().await { Ok(b) => b.to_vec(), Err(_) => return logo_response() };
+    if bytes.is_empty() { return logo_response(); }
+    ([(header::CONTENT_TYPE, ct),
+      (header::CACHE_CONTROL, "public, max-age=86400".to_string())], bytes).into_response()
 }
 
 // ============================ 自定义音源管理 ============================

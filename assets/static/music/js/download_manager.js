@@ -247,8 +247,10 @@ class DownloadManager {
     }
 
     // Helper to get song cover
+    // 复用主页面统一的封面解析：kw/kg 等无封面歌曲走服务端 getPic + 同源图片代理
     getSongCover(song) {
         if (!song) return '/music/assets/logo.svg';
+        if (window.getImgUrl) return window.getImgUrl(song);
         return song.img || song.pic ||
             (song.meta && (song.meta.picUrl || song.meta.img)) ||
             (song.album && (song.album.picUrl || song.album.img)) ||
