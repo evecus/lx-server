@@ -1541,15 +1541,10 @@
                                         </h3>
                                         <div id="settings-source-scope-tag" class="hidden flex items-center gap-1">
                                         </div>
-                                        <span id="settings-admin-tag"
-                                            class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-500 whitespace-nowrap hidden">管理员</span>
+                                        
                                     </div>
-                                    <button id="btn-admin-logout" onclick="handleAdminLogout()"
-                                        class="ml-auto text-[10px] px-3 py-1 bg-red-50 text-red-500 rounded-full hover:bg-red-100 transition-all border border-red-100 hidden">退出管理员</button>
-                                    <button id="btn-admin-login" onclick="handleAdminLogin()"
-                                        class="ml-auto text-[10px] px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full hover:bg-emerald-100 transition-all border border-emerald-100 flex items-center gap-1.5 hidden">
-                                        <i class="fas fa-user-shield"></i> 管理员登录
-                                    </button>
+                                    
+                                    
                                 </div>
                                 <p class="text-xs t-text-muted mb-4 font-medium uppercase tracking-wider">管理和配置第三方音乐源脚本
                                 </p>
@@ -3058,12 +3053,8 @@
                     onclick="handleDownloadClick(event)" title="下载/缓存">
                     <i class="fas fa-download text-[10px]"></i>
                 </button>
-                <!-- Sound Effects Button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
-                    onclick="window.soundEffects && window.soundEffects.toggle()" title="均衡器 & 音效">
-                    <i class="fas fa-sliders-h text-[10px]"></i>
-                </button>
+                
+                
                 <!-- Comment button (Mobile) -->
                 <button
                     class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
@@ -3203,12 +3194,8 @@
                 onclick="handleDownloadClick(event)" title="下载/缓存">
                 <i class="fas fa-download text-sm"></i>
             </button>
-            <!-- Sound Effects Button -->
-            <button id="btn-sound-effects"
-                class="text-gray-500 hover:text-emerald-600 text-sm font-bold border border-gray-300 rounded px-2 py-0.5 transition-colors"
-                onclick="window.soundEffects && window.soundEffects.toggle()" title="均衡器 & 音效">
-                <i class="fas fa-sliders-h text-sm"></i>
-            </button>
+            
+            
             <!-- Share Card button (Desktop) -->
             <button
                 class="text-gray-500 hover:text-emerald-600 text-sm font-bold border border-gray-300 rounded px-2 py-0.5 transition-colors"
@@ -3407,7 +3394,7 @@
 
             <!-- Toolbar -->
             <div class="p-4 border-b t-border-main flex gap-3 t-bg-panel">
-                <input type="file" id="script-file" accept=".js" class="hidden" onchange="handleFileUpload(this)">
+                <input type="file" id="script-file" class="hidden" onchange="handleFileUpload(this)">
                 <button onclick="document.getElementById('script-file').click()"
                     class="flex-1 flex items-center justify-center px-4 py-2.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-colors font-medium">
                     <i class="fas fa-upload mr-2"></i>上传脚本文件
@@ -4044,142 +4031,8 @@
         </div>
     </div>
 
-    <!-- Sound Effects Modal -->
-    <div id="sound-effects-modal"
-        class="fixed inset-0 z-[70] hidden items-center justify-center p-4 md:p-6 transition-all duration-300">
-        <div class="absolute inset-0 bg-black/40" onclick="window.soundEffects && window.soundEffects.close()"></div>
-        <div id="sound-effects-content"
-            class="relative w-full max-w-5xl max-h-[90vh] md:max-h-[85vh] t-bg-panel rounded-xl shadow-2xl border t-border-main flex flex-col overflow-hidden transform translate-y-10 opacity-0 transition-all duration-500">
-
-            <!-- Header -->
-            <div class="p-4 border-b t-border-main flex items-center justify-between t-bg-panel">
-                <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center">
-                        <i class="fas fa-sliders-h text-white text-sm"></i>
-                    </div>
-                    <h3 class="text-sm font-black t-text-main">均衡器与音效调节</h3>
-                </div>
-                <button onclick="window.soundEffects && window.soundEffects.close()"
-                    class="w-8 h-8 flex items-center justify-center t-text-muted hover:text-red-500 transition-colors rounded-lg hover:t-bg-item-hover">
-                    <i class="fas fa-times text-lg"></i>
-                </button>
-            </div>
-
-            <!-- Body -->
-            <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 md:divide-x t-border-main">
-
-                    <!-- Left Column -->
-                    <div class="space-y-8 pr-0 md:pr-6">
-                        <!-- Environment Reverb -->
-                        <section class="space-y-4">
-                            <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">环境混响音效</h4>
-                            <div id="reverb-list" class="flex flex-wrap gap-x-4 gap-y-3">
-                                <!-- Radio options -->
-                            </div>
-                            <div class="space-y-5 pt-2">
-                                <div class="space-y-2">
-                                    <div class="flex justify-between text-[11px] font-bold t-text-muted">
-                                        <span>原始音量增益 (DRY)</span>
-                                        <span id="reverb-main-gain-val" class="font-mono">100%</span>
-                                    </div>
-                                    <input type="range" id="reverb-main-gain" min="0" max="300" value="100"
-                                        class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
-                                </div>
-                                <div class="space-y-2">
-                                    <div class="flex justify-between text-[11px] font-bold t-text-muted">
-                                        <span>环境音效增益 (WET)</span>
-                                        <span id="reverb-send-gain-val" class="font-mono">80%</span>
-                                    </div>
-                                    <input type="range" id="reverb-send-gain" min="0" max="300" value="80"
-                                        class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
-                                </div>
-                            </div>
-                        </section>
-
-                        <div class="h-px bg-t-border-main"></div>
-
-                        <!-- Pitch Shift -->
-                        <section class="space-y-4">
-                            <div class="flex items-center justify-between">
-                                <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">
-                                    音调升降调节
-                                </h4>
-                                <button onclick="window.soundEffects && window.soundEffects.resetPitch()"
-                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置</button>
-                            </div>
-                            <div class="flex items-center gap-4 px-2">
-                                <span class="w-10 text-center text-xs font-mono font-bold t-text-main"
-                                    id="pitch-val">1.00x</span>
-                                <input type="range" id="pitch-slider" min="0.5" max="2.0" step="0.01" value="1.0"
-                                    class="flex-1 h-1.5 rounded-full lc-range-input cursor-pointer">
-                            </div>
-                        </section>
-
-                        <div class="h-px bg-t-border-main"></div>
-
-                        <!-- 3D Panner -->
-                        <section class="space-y-4">
-                            <div class="flex items-center justify-between">
-                                <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">3D 立体环绕 (需使用耳机)
-                                </h4>
-                                <label
-                                    class="flex items-center gap-2 cursor-pointer group text-[11px] font-bold t-text-muted">
-                                    <input type="checkbox" id="panner-enable" class="w-3.5 h-3.5 accent-emerald-500">
-                                    启用
-                                </label>
-                            </div>
-                            <div class="grid grid-cols-2 gap-8 px-2">
-                                <div class="space-y-2">
-                                    <div class="flex justify-between text-[10px] font-bold t-text-muted">
-                                        <span>环绕速度</span>
-                                        <span id="panner-speed-val" class="font-mono">25</span>
-                                    </div>
-                                    <input type="range" id="panner-speed" min="1" max="50" value="25"
-                                        class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
-                                </div>
-                                <div class="space-y-2">
-                                    <div class="flex justify-between text-[10px] font-bold t-text-muted">
-                                        <span>声音距离</span>
-                                        <span id="panner-distance-val" class="font-mono">5</span>
-                                    </div>
-                                    <input type="range" id="panner-distance" min="1" max="30" value="5"
-                                        class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
-                                </div>
-                            </div>
-                        </section>
-                    </div>
-
-                    <!-- Right Column -->
-                    <div class="pl-0 md:pl-8">
-                        <div class="sticky top-0 t-bg-panel z-10 space-y-4 pb-4">
-                            <div class="flex items-center justify-between">
-                                <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">均衡器调节</h4>
-                                <button onclick="window.soundEffects && window.soundEffects.resetEQ()"
-                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置</button>
-                            </div>
-                        </div>
-
-                        <!-- EQ Sliders Grid -->
-                        <div id="eq-sliders-container" class="min-h-[300px]">
-                            <!-- Injected by JS: 2 columns of horizontal sliders -->
-                        </div>
-
-                        <div class="h-px bg-t-border-main my-8"></div>
-
-                        <!-- Presets -->
-                        <section class="space-y-4">
-                            <p class="text-[10px] font-black t-text-muted uppercase tracking-widest">快速预设</p>
-                            <div id="eq-presets" class="flex flex-wrap gap-2">
-                                <!-- Injected by JS -->
-                            </div>
-                        </section>
-                    </div>
-
-                </div>
-            </div>
-        </div>
-    </div>
+    
+    
 
 
     <!-- Audio Element -->
@@ -4201,7 +4054,6 @@
     <script src="/music/js/visualizer.js"></script>
     <script src="/music/js/pwa.js"></script>
     <script src="/music/js/lyric-card.js"></script>
-    <script src="/music/js/sound-effects.js"></script>
     <script src="/music/js/download_manager.js"></script>
     <script src="/music/app.js"></script>
     <script>

@@ -27,13 +27,9 @@ const ASSETS_TO_CACHE = [
     '/music/js/Sortable.min.js',
     '/music/js/marked.min.js',
     // 音频效果
-    '/music/js/sound-effects.js',
     '/music/js/visualizer.js',
     '/music/js/wave.js',
     // 变调器
-    '/music/js/pitch-shifter/fft.js',
-    '/music/js/pitch-shifter/ola-processor.js',
-    '/music/js/pitch-shifter/phase-vocoder.js',
     // 静态资源
     '/music/assets/logo.svg',
 ];

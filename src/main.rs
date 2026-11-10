@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
         js, sources,
         data: std::sync::Arc::new(data.clone()),
         http,
+        sessions: Default::default(),
     };
     let app = server::router(st);
     let addr = format!("{}:{}", cfg.server.bind_ip, cfg.server.port);

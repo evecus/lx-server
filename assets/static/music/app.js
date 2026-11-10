@@ -132,6 +132,20 @@ let expandBtnTimeout = null; // 展开按钮淡化计时器
 let toggleLyricsBtnTimeout = null; // 歌词按钮淡化计时器
 
 // ===== 认证相关代码 (服务端 Cookie Session) =====
+// 任何接口返回 401（会话失效/未登录）时统一跳转登录页
+(function () {
+    const _fetch = window.fetch.bind(window);
+    window.fetch = async function (...args) {
+        const res = await _fetch(...args);
+        try {
+            const u = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+            if (res.status === 401 && u.includes('/api/') && !u.includes('/api/music/auth')) {
+                window.location.replace('/music/login');
+            }
+        } catch (e) {}
+        return res;
+    };
+})();
 let authEnabled = false;
 // authToken 保留用于 API 请求头 x-user-token（与播放器登录认证不同）
 let authToken = sessionStorage.getItem('lx_player_auth');
@@ -2118,17 +2132,9 @@ async function checkServerCache(song, quality, exactQuality = false) {
  * 管理员权限验证通用处理逻辑
  * 如果检测到 403 错误，弹出密码输入框并保存密码后重试
  */
-async function handleAdminAuth(message) {
-    const pass = await showInput('管理员身份验证', message, {
-        placeholder: '请输入后台管理密码',
-        inputType: 'password'
-    });
-    if (pass) {
-        localStorage.setItem('lx_admin_password', pass);
-        updateAdminUI(); // 更新 UI 状态
-        return true;
-    }
-    return false;
+// 已移除管理员二次验证：全站只有 /music/login 一个登录入口，登录后即拥有全部权限
+async function handleAdminAuth(_message) {
+    return true;
 }
 window.handleAdminAuth = handleAdminAuth;
 
@@ -2154,23 +2160,8 @@ window.handleAdminLogout = handleAdminLogout;
 
 // 更新管理员相关 UI 元素
 function updateAdminUI() {
-    const isAdmin = !!localStorage.getItem('lx_admin_password');
-    const isPublic = !currentListData?.username || currentListData?.username === 'default';
-
-    // 自定义源部分的标签和按钮
-    const adminTag = document.getElementById('settings-admin-tag');
-    const loginBtn = document.getElementById('btn-admin-login');
-    const logoutBtn = document.getElementById('btn-admin-logout');
     const scopeTag = document.getElementById('settings-source-scope-tag');
-
-    if (adminTag) adminTag.classList.toggle('hidden', !isAdmin);
-    if (logoutBtn) logoutBtn.classList.toggle('hidden', !isAdmin);
-    if (loginBtn) {
-        loginBtn.classList.toggle('hidden', isAdmin || !window.lx_config?.['user.enablePublicRestriction'] || !isPublic);
-    }
-    if (scopeTag) {
-        scopeTag.classList.toggle('hidden', !isPublic);
-    }
+    if (scopeTag) scopeTag.classList.add('hidden');
 }
 
 async function triggerServerCache(song, url, quality) {
@@ -2181,7 +2172,7 @@ async function triggerServerCache(song, url, quality) {
         if (username) headers['x-user-name'] = username;
 
         // 添加管理员验证 Header (如果已登录)
-        const adminPass = localStorage.getItem('lx_admin_password');
+        const adminPass = null;
         if (adminPass) headers['x-frontend-auth'] = adminPass;
 
         await fetch('/api/music/cache/download', {
@@ -2195,7 +2186,7 @@ async function triggerServerCache(song, url, quality) {
 
 function updateServerCacheConfig(location) {
     const headers = { 'Content-Type': 'application/json' };
-    const adminPass = localStorage.getItem('lx_admin_password');
+    const adminPass = null;
     if (adminPass) headers['x-frontend-auth'] = adminPass;
 
     fetch('/api/music/cache/config', {
@@ -3664,7 +3655,7 @@ async function updateSetting(key, value) {
     const restrictedKeys = ['enableServerCache', 'enableServerLyricCache', 'serverCacheLocation'];
     const isPublic = !currentListData?.username || currentListData?.username === 'default';
     const enablePublicRestriction = window.lx_config?.['user.enablePublicRestriction'];
-    const isAdmin = !!localStorage.getItem('lx_admin_password');
+    const isAdmin = true;
 
     // [新增] 权限校验：受限公开用户修改核心设置
     if (restrictedKeys.includes(key) && isPublic && enablePublicRestriction && !isAdmin) {
@@ -3847,7 +3838,7 @@ const SETTINGS_UI_MAP = {
 function syncSettingsUI(key = null, value = null) {
     const isPublic = !currentListData?.username || currentListData?.username === 'default';
     const enablePublicRestriction = window.lx_config?.['user.enablePublicRestriction'];
-    const isAdmin = !!localStorage.getItem('lx_admin_password');
+    const isAdmin = true;
     const restrictedKeys = ['enableServerCache', 'enableServerLyricCache', 'serverCacheLocation'];
 
     const updateItem = (itemKey, itemValue, isSingle) => {
@@ -3985,7 +3976,7 @@ async function clearCache(type) {
         if (clearServerLyric) {
             const isPublicUser = !window.currentListData || !window.currentListData.username || window.currentListData.username === 'default';
             if (isPublicUser && window.lx_config && window.lx_config['user.enablePublicRestriction']) {
-                const isAdminSession = localStorage.getItem('lx_admin_password');
+                const isAdminSession = true;
                 const enableServerLyricCache = window.settings && window.settings.enableServerLyricCache === true;
                 if (!enableServerLyricCache && !isAdminSession) {
                     if (typeof window.handleAdminAuth === 'function') {
@@ -4371,7 +4362,7 @@ function updateCacheBatchCount() {
 
 async function removeCacheItem(filename) {
     if ((!window.currentListData || !window.currentListData.username || window.currentListData.username === 'default') && window.lx_config && window.lx_config['user.enablePublicRestriction']) {
-        const isAdminSession = localStorage.getItem('lx_admin_password');
+        const isAdminSession = true;
         const enableServerCache = window.settings && window.settings.enableServerCache === true;
         if (!enableServerCache && !isAdminSession) {
             if (typeof window.handleAdminAuth === 'function') {
@@ -4415,7 +4406,7 @@ async function batchDeleteCache() {
     }
 
     if ((!window.currentListData || !window.currentListData.username || window.currentListData.username === 'default') && window.lx_config && window.lx_config['user.enablePublicRestriction']) {
-        const isAdminSession = localStorage.getItem('lx_admin_password');
+        const isAdminSession = true;
         const enableServerCache = window.settings && window.settings.enableServerCache === true;
         if (!enableServerCache && !isAdminSession) {
             if (typeof window.handleAdminAuth === 'function') {
@@ -4455,7 +4446,7 @@ async function batchDeleteCache() {
 
 async function clearServerCache() {
     if ((!window.currentListData || !window.currentListData.username || window.currentListData.username === 'default') && window.lx_config && window.lx_config['user.enablePublicRestriction']) {
-        const isAdminSession = localStorage.getItem('lx_admin_password');
+        const isAdminSession = true;
         const enableServerCache = window.settings && window.settings.enableServerCache === true;
         if (!enableServerCache && !isAdminSession) {
             if (typeof window.handleAdminAuth === 'function') {
@@ -5413,7 +5404,7 @@ async function pushSettingsToServer() {
             'x-user-name': user,
             'x-user-password': pass
         };
-        const adminPass = localStorage.getItem('lx_admin_password');
+        const adminPass = null;
         if (adminPass) headers['x-frontend-auth'] = adminPass;
 
         const res = await fetch('/api/user/settings', {
@@ -5425,10 +5416,6 @@ async function pushSettingsToServer() {
             console.log('[Settings] 已成功同步到服务器');
         }
 
-        // 同时同步音质配置
-        if (window.soundEffects && typeof window.soundEffects.pushToServer === 'function') {
-            window.soundEffects.pushToServer();
-        }
     } catch (e) {
         console.error('[Settings] 同步到服务器失败:', e);
     }
@@ -5453,7 +5440,7 @@ async function fetchSettingsFromServer() {
             'x-user-name': user,
             'x-user-password': pass
         };
-        const adminPass = localStorage.getItem('lx_admin_password');
+        const adminPass = null;
         if (adminPass) headers['x-frontend-auth'] = adminPass;
 
         const res = await fetch('/api/user/settings', {
@@ -5472,10 +5459,6 @@ async function fetchSettingsFromServer() {
                 showSuccess('已从服务器恢复设置');
             }
 
-            // 同时加载音效设置
-            if (window.soundEffects && typeof window.soundEffects.fetchFromServer === 'function') {
-                window.soundEffects.fetchFromServer();
-            }
         } else {
             console.log('[Settings] 服务器无设置文件或加载失败');
         }
@@ -6470,7 +6453,7 @@ async function handleFileUpload(input) {
 
         // 先验证脚本
         showInfo('正在验证脚本...');
-        const adminPass = localStorage.getItem('lx_admin_password');
+        const adminPass = null;
         const headers = { 'Content-Type': 'application/json' };
         if (adminPass) headers['x-frontend-auth'] = adminPass;
 
@@ -6551,7 +6534,7 @@ async function handleUrlImport() {
 
         const username = currentListData?.username || 'default';
         const headers = { 'Content-Type': 'application/json' };
-        const adminPass = localStorage.getItem('lx_admin_password');
+        const adminPass = null;
         if (adminPass) headers['x-frontend-auth'] = adminPass;
 
         // 从服务器代理下载
@@ -6619,7 +6602,7 @@ async function handleUrlImport() {
 // 上传自定义源到服务器
 async function uploadCustomSource(filename, content, type, allowUnsafeVM = false) {
     const headers = { 'Content-Type': 'application/json' };
-    const adminPass = localStorage.getItem('lx_admin_password');
+    const adminPass = null;
     if (adminPass) headers['x-frontend-auth'] = adminPass;
 
     const response = await fetch('/api/custom-source/upload', {
@@ -6918,7 +6901,7 @@ async function renderCustomSources() {
                     try {
                         const username = currentListData?.username || 'default';
                         const headers = { 'Content-Type': 'application/json' };
-                        const adminPass = localStorage.getItem('lx_admin_password');
+                        const adminPass = null;
                         if (adminPass) headers['x-frontend-auth'] = adminPass;
 
                         const response = await fetch('/api/custom-source/reorder', {
@@ -6987,7 +6970,7 @@ async function toggleSource(sourceId, currentEnabled, allowUnsafeVM = false) {
     try {
         const username = currentListData?.username || 'default';
         const headers = { 'Content-Type': 'application/json' };
-        const adminPass = localStorage.getItem('lx_admin_password');
+        const adminPass = null;
         if (adminPass) headers['x-frontend-auth'] = adminPass;
 
         const response = await fetch('/api/custom-source/toggle', {
@@ -7034,7 +7017,7 @@ async function deleteSource(sourceId) {
     try {
         const username = currentListData?.username || 'default';
         const headers = { 'Content-Type': 'application/json' };
-        const adminPass = localStorage.getItem('lx_admin_password');
+        const adminPass = null;
         if (adminPass) headers['x-frontend-auth'] = adminPass;
 
         const response = await fetch('/api/custom-source/delete', {
@@ -8001,7 +7984,7 @@ async function handleDownloadClick(event) {
         // [新增] 权限校验：受限公开用户需要验证管理员
         const isPublic = !window.currentListData?.username || window.currentListData?.username === 'default';
         const enablePublicRestriction = window.lx_config?.['user.enablePublicRestriction'];
-        const isAdmin = !!localStorage.getItem('lx_admin_password');
+        const isAdmin = true;
         const isServerCacheAllowed = window.settings?.enableServerCache === true;
 
         if (isPublic && enablePublicRestriction && !isServerCacheAllowed && !isAdmin) {
@@ -8715,14 +8698,12 @@ function togglePlayerPanel() {
 window.togglePlayerPanel = togglePlayerPanel;
 window.updateSetting = updateSetting;
 
-// Initialize Sound Effects on first play/click
+// 首次播放/点击时初始化音频可视化
 function initAudioEngine() {
-    if (window.soundEffects && !window._audioEngineInited) {
-        window.soundEffects.init();
+    if (!window._audioEngineInited) {
         window._audioEngineInited = true;
-        console.log('[AudioEngine] Sound effects initialized via AudioEngine');
 
-        // Ensure Visualizer captures correct source
+        // 音效模块已移除，首次交互时直接初始化可视化
         if (window.musicVisualizer && window.musicVisualizer.init) {
             window.musicVisualizer.init();
         }

@@ -8,14 +8,9 @@ port = 9527
 data_dir = "data"
 
 [auth]
-# 播放器访问密码。留空 = 不启用认证（局域网自用推荐）
+# 访问密码（唯一登录入口 /music/login）。留空 = 不启用认证；填写即启用
+# 也可用环境变量 PLAYER_PASSWORD 覆盖
 password = ""
-# 管理接口（导入/删除音源）密码，留空沿用 player.frontend_password / auth.password
-admin_password = ""
-
-[player]
-enable_auth = false
-frontend_password = ""
 
 [proxy]
 # 出口代理，例如 "socks5://127.0.0.1:1080" 或 "http://127.0.0.1:7890"，留空直连

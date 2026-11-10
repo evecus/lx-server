@@ -23,16 +23,10 @@ const musicVisualizer = (function () {
             console.log('[Visualizer] Initializing AudioContext...');
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
-            // 如果音效管理器已存在，使用它的分析器
-            if (window.soundEffects && window.soundEffects.getAnalyser()) {
-                audioAnalyser = window.soundEffects.getAnalyser();
-                console.log('[Visualizer] Using analyser from SoundEffectsManager');
-            } else {
-                audioSource = audioContext.createMediaElementSource(audio);
-                audioAnalyser = audioContext.createAnalyser();
-                audioSource.connect(audioAnalyser);
-                audioAnalyser.connect(audioContext.destination);
-            }
+            audioSource = audioContext.createMediaElementSource(audio);
+            audioAnalyser = audioContext.createAnalyser();
+            audioSource.connect(audioAnalyser);
+            audioAnalyser.connect(audioContext.destination);
 
             audioAnalyser.smoothingTimeConstant = 0.8;
             audioAnalyser.fftSize = 512;

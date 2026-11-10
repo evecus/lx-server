@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub server: ServerConfig,
     pub auth: AuthConfig,
-    pub player: PlayerConfig,
     pub proxy: ProxyConfig,
 }
 
@@ -22,17 +21,8 @@ pub struct ServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AuthConfig {
-    /// 播放器访问密码，留空表示不启用认证
+    /// 唯一的访问密码（/music/login），留空表示不启用认证
     pub password: String,
-    /// 管理接口（导入音源等）密码，留空沿用 player.password
-    pub admin_password: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PlayerConfig {
-    pub enable_auth: bool,
-    pub frontend_password: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +39,6 @@ impl Default for Config {
         Self {
             server: ServerConfig::default(),
             auth: AuthConfig::default(),
-            player: PlayerConfig::default(),
             proxy: ProxyConfig::default(),
         }
     }
@@ -61,12 +50,7 @@ impl Default for ServerConfig {
 }
 impl Default for AuthConfig {
     fn default() -> Self {
-        Self { password: String::new(), admin_password: String::new() }
-    }
-}
-impl Default for PlayerConfig {
-    fn default() -> Self {
-        Self { enable_auth: false, frontend_password: String::new() }
+        Self { password: String::new() }
     }
 }
 impl Default for ProxyConfig {
@@ -95,14 +79,13 @@ impl Config {
         }
         if let Ok(v) = std::env::var("BIND_IP") { cfg.server.bind_ip = v; }
         if let Ok(v) = std::env::var("DATA_PATH") { cfg.server.data_dir = v; }
-        if let Ok(v) = std::env::var("PLAYER_PASSWORD") {
-            cfg.player.frontend_password = v.clone();
-            cfg.auth.password = v;
-        }
-        if let Ok(v) = std::env::var("ADMIN_PASSWORD") { cfg.auth.admin_password = v; }
+        if let Ok(v) = std::env::var("PLAYER_PASSWORD") { cfg.auth.password = v; }
         if let Ok(v) = std::env::var("OUTBOUND_PROXY") { cfg.proxy.outbound = v; }
         Ok(cfg)
     }
+
+    /// 配置了密码即启用认证
+    pub fn auth_enabled(&self) -> bool { !self.auth.password.is_empty() }
 
     pub fn data_path(&self) -> PathBuf { PathBuf::from(&self.server.data_dir) }
 }

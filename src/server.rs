@@ -1,12 +1,13 @@
 //! HTTP 服务：复用 lx-music-server 前端契约，后端全部由 Rust 实现。
 use crate::{config::Config, js_engine::JsHandle, sources::SourceStore};
 use axum::{
-    body::Body, extract::{Query, State}, http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Response}, routing::{get, post}, Json, Router,
+    body::Body, extract::{Query, Request, State}, http::{header, HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Redirect, Response}, routing::{get, post}, Json, Router,
 };
 use futures::StreamExt;
 use serde_json::{json, Value};
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, Mutex}};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -15,6 +16,8 @@ pub struct AppState {
     pub sources: SourceStore,
     pub data: Arc<PathBuf>,
     pub http: reqwest::Client,
+    /// 已登录会话 token（内存保存，重启后需重新登录）
+    pub sessions: Arc<Mutex<HashSet<String>>>,
 }
 
 type R = Result<Json<Value>, (StatusCode, Json<Value>)>;
@@ -59,7 +62,6 @@ pub fn router(st: AppState) -> Router {
         .route("/api/custom-source/reorder", post(source_reorder))
         // ---------- 用户设置 ----------
         .route("/api/user/settings", get(user_settings_get).post(user_settings_post))
-        .route("/api/user/sound-effects", get(user_sfx_get).post(user_sfx_post))
         .route("/api/user/verify", post(user_verify))
         .route("/api/user/list", get(user_list).post(user_list_post))
         .route("/api/music/user/list/remove", post(user_list_remove))
@@ -84,6 +86,7 @@ pub fn router(st: AppState) -> Router {
         .route("/", get(|| async { axum::response::Redirect::temporary("/music/") }))
         .route("/music/login", get(|| async { serve_embedded("music/login.html") }))
         .fallback(serve_static)
+        .layer(middleware::from_fn_with_state(st.clone(), auth_guard))
         .with_state(st)
 }
 
@@ -116,7 +119,7 @@ async fn dynamic_config(State(st): State<AppState>) -> Response {
         "disableTelemetry": true, "proxy.enabled": !c.proxy.real_ip_header.is_empty(),
         "user.enablePath": false, "user.enableRoot": true,
         "user.enablePublicRestriction": false, "maxSnapshotNum": 10,
-        "list.addMusicLocationType": "top", "player.enableAuth": c.player.enable_auth,
+        "list.addMusicLocationType": "top", "player.enableAuth": c.auth_enabled(),
         "port": c.server.port, "bindIP": c.server.bind_ip,
     }));
     ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"),
@@ -124,18 +127,69 @@ async fn dynamic_config(State(st): State<AppState>) -> Response {
 }
 
 async fn music_config(State(st): State<AppState>) -> R {
-    ok(json!({"player.enableAuth": st.cfg.player.enable_auth, "user.enablePublicRestriction": false}))
+    ok(json!({"player.enableAuth": st.cfg.auth_enabled(), "user.enablePublicRestriction": false}))
 }
-async fn auth_login(State(st): State<AppState>, body: String) -> R {
+
+const COOKIE_NAME: &str = "lx_session";
+
+fn cookie_token(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(header::COOKIE)?.to_str().ok()?;
+    raw.split(';').filter_map(|kv| kv.trim().split_once('='))
+        .find(|(k, _)| *k == COOKIE_NAME).map(|(_, v)| v.to_string())
+}
+fn is_authed(st: &AppState, headers: &HeaderMap) -> bool {
+    if !st.cfg.auth_enabled() { return true; }
+    cookie_token(headers).map(|t| st.sessions.lock().unwrap().contains(&t)).unwrap_or(false)
+}
+
+/// 全站唯一的登录校验：只认 /music/login 的访问密码，生成的 cookie 会话。
+/// 未登录时：API 返回 401，页面入口跳转登录页；登录页及其静态资源放行。
+async fn auth_guard(State(st): State<AppState>, req: Request, next: Next) -> Response {
+    if !st.cfg.auth_enabled() || is_authed(&st, req.headers()) {
+        return next.run(req).await;
+    }
+    let path = req.uri().path();
+    let open = path == "/music/login"
+        || path == "/api/music/config"
+        || path == "/api/music/auth"
+        || path == "/api/music/auth/verify"
+        || path == "/api/music/auth/logout"
+        || path == "/js/config.js"
+        || path == "/hello" || path == "/id";
+    if open { return next.run(req).await; }
+    if path.starts_with("/api/") {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "未登录", "code": 401}))).into_response();
+    }
+    if path == "/" || path == "/music" || path == "/music/" || path == "/music/index.html" {
+        return Redirect::temporary("/music/login").into_response();
+    }
+    next.run(req).await // 登录页依赖的静态资源（css/js/字体/logo）
+}
+
+async fn auth_login(State(st): State<AppState>, body: String) -> Response {
     let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
-    if !st.cfg.player.enable_auth { return ok(json!({"success": true})); }
+    if !st.cfg.auth_enabled() {
+        return Json(json!({"success": true})).into_response();
+    }
     let pass = v["password"].as_str().unwrap_or("");
-    if pass == st.cfg.player.frontend_password || pass == st.cfg.auth.password {
-        ok(json!({"success": true}))
-    } else { Err(bad("密码错误")) }
+    if !pass.is_empty() && pass == st.cfg.auth.password {
+        let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+        st.sessions.lock().unwrap().insert(token.clone());
+        let cookie = format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000");
+        ([(header::SET_COOKIE, cookie)], Json(json!({"success": true}))).into_response()
+    } else {
+        (StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "密码错误"}))).into_response()
+    }
 }
-async fn auth_verify() -> R { ok(json!({"success": true, "authenticated": true})) }
-async fn auth_logout() -> R { ok(json!({"success": true})) }
+async fn auth_verify(State(st): State<AppState>, headers: HeaderMap) -> R {
+    let ok_ = is_authed(&st, &headers);
+    ok(json!({"success": ok_, "valid": ok_, "authenticated": ok_}))
+}
+async fn auth_logout(State(st): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(t) = cookie_token(&headers) { st.sessions.lock().unwrap().remove(&t); }
+    let cookie = format!("{COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+    ([(header::SET_COOKIE, cookie)], Json(json!({"success": true}))).into_response()
+}
 
 // ============================ 内置 SDK 调用 ============================
 fn qs(m: &HashMap<String, String>, k: &str, d: &str) -> String {
@@ -406,12 +460,6 @@ async fn user_settings_get(State(st): State<AppState>) -> R { ok(read_json(user_
 async fn user_settings_post(State(st): State<AppState>, body: String) -> R {
     let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
     let _ = write_json(user_file(&st, "settings.json"), &v).await;
-    ok(json!({"success": true}))
-}
-async fn user_sfx_get(State(st): State<AppState>) -> R { ok(read_json(user_file(&st, "soundEffects.json"), json!({})).await) }
-async fn user_sfx_post(State(st): State<AppState>, body: String) -> R {
-    let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
-    let _ = write_json(user_file(&st, "soundEffects.json"), &v).await;
     ok(json!({"success": true}))
 }
 async fn user_verify() -> R { ok(json!({"success": true, "username": "default"})) }
