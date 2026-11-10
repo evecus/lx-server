@@ -1,0 +1,23 @@
+# lx-rs 配置文件。运行时不依赖 Node.js，单二进制 + 外置 data/。
+# 修改后重启生效；环境变量优先级高于本文件。
+
+[server]
+name = "lx-rs"
+bind_ip = "0.0.0.0"
+port = 9527
+data_dir = "data"
+
+[auth]
+# 播放器访问密码。留空 = 不启用认证（局域网自用推荐）
+password = ""
+# 管理接口（导入/删除音源）密码，留空沿用 player.frontend_password / auth.password
+admin_password = ""
+
+[player]
+enable_auth = false
+frontend_password = ""
+
+[proxy]
+# 出口代理，例如 "socks5://127.0.0.1:1080" 或 "http://127.0.0.1:7890"，留空直连
+outbound = ""
+real_ip_header = "x-real-ip"
