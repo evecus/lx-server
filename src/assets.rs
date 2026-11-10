@@ -1,5 +1,5 @@
 //! 只读资产访问层：Web 前端 + QuickJS 引擎资产由 build.rs 编译期内嵌。
-//! 运行时不读取磁盘，data/ 只保留需要读写的配置、音源与用户数据。
+//! 运行时不读取磁盘，数据目录（由配置指定）只保留需要读写的音源、用户数据与缓存。
 include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
 
 /// 按 URL 路径（不含前导 `/`）取内嵌前端文件，例如 `music/index.html`。

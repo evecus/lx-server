@@ -2,11 +2,8 @@
 /target/
 /lx-rs
 
-# 运行期生成的数据（保留目录结构与 .gitkeep）
-data/users/*
-data/cache/*
-!data/users/.gitkeep
-!data/cache/.gitkeep
+# 运行期自动生成的数据目录
+/data/
 
 # CI 组装目录、日志、压缩包
 /dist/

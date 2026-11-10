@@ -1,4 +1,4 @@
-//! 自定义音源脚本的持久化：data/scripts/*.js + sources.json
+//! 自定义音源脚本的持久化：<data_dir>/scripts/*.js + sources.json
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
