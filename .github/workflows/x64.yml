@@ -2,8 +2,6 @@ name: build linux x64
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master]
 
 jobs:
   build-x64-musl:
@@ -36,15 +34,11 @@ jobs:
 
       - name: Collect artifact
         run: |
-          mkdir lx-server
-          cp target/x86_64-unknown-linux-musl/release/lx-server lx-server/lx-server
-          chmod 755 lx-server/lx-server
-          cp config.toml lx-server/config.toml
-          tar -czvf lx-server-linux-x64.tar.gz lx-server
+          cp target/x86_64-unknown-linux-musl/release/lx-server lx-server-linux-x64
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: test
           prerelease: true
-          files: lx-server-linux-x64.tar.gz
+          files: lx-server-linux-x64

@@ -6500,7 +6500,10 @@ async function handleFileUpload(input) {
             }
         }
 
-        showSuccess(`已上传: ${validation.metadata.name || file.name} ${validation.metadata.version ? (/^v/i.test(validation.metadata.version) ? validation.metadata.version : 'v' + validation.metadata.version) : ''}`);
+        if (result.duplicate) {
+            showInfo(`该音源已存在，已跳过重复上传: ${validation.metadata.name || file.name}`);
+        } else
+        showSuccess(`${result.updated ? '已更新' : '已上传'}: ${validation.metadata.name || file.name} ${validation.metadata.version ? (/^v/i.test(validation.metadata.version) ? validation.metadata.version : 'v' + validation.metadata.version) : ''}`);
 
         // 重置输入
         input.value = '';
@@ -6589,7 +6592,13 @@ async function handleUrlImport() {
             }
         }
 
-        showSuccess(`已导入: ${result.filename}`);
+        if (result.duplicate) {
+            showInfo(`该音源已存在，已跳过重复导入: ${result.filename || ''}`);
+        } else if (result.updated) {
+            showSuccess(`已更新: ${result.filename}`);
+        } else {
+            showSuccess(`已导入: ${result.filename}`);
+        }
 
         // 刷新源列表
         loadCustomSources();
@@ -6699,13 +6708,7 @@ function togglePublicSourcesSetting() {
 async function renderCustomSources() {
     let list = await fetchCustomSources();
 
-    // Filter based on setting
-    if (settings.enablePublicSources === false) {
-        // Filter out sources where owner is 'open'. 
-        // Note: fetchCustomSources returns API objects. We need to check structure.
-        // The API returns array of { id, name, version, ..., owner: 'open' || 'username' }
-        list = list.filter(item => item.owner !== 'open');
-    }
+    // 单用户模式：所有源都是服务器上的公开源，不再按 owner 过滤
 
     updateSourceScopeUI();
 

@@ -1,5 +1,5 @@
 //! HTTP 服务：复用 lx-music-server 前端契约，后端全部由 Rust 实现。
-use crate::{config::Config, js_engine::JsHandle, sources::SourceStore};
+use crate::{config::Config, js_engine::JsHandle, sources::{AddOutcome, SourceStore}};
 use axum::{
     body::Body, extract::{Query, Request, State}, http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
@@ -380,7 +380,7 @@ async fn source_upload(State(st): State<AppState>, body: String) -> R {
     };
     let sources: Vec<String> = serde_json::from_value(info["sources"].clone()).unwrap_or_default();
     match st.sources.add(script, "", &sources, true) {
-        Ok(id) => { reload_active(&st).await; ok(json!({"success": true, "id": id, "metadata": info["metadata"], "supportedSources": sources, "owner": "open"})) }
+        Ok((id, o)) => { reload_active(&st).await; ok(json!({"success": true, "id": id, "duplicate": o == AddOutcome::Duplicate, "updated": o == AddOutcome::Updated, "metadata": info["metadata"], "supportedSources": sources, "owner": "open"})) }
         Err(e) => ok(json!({"success": false, "error": e.to_string()})),
     }
 }
@@ -404,7 +404,7 @@ async fn source_import(State(st): State<AppState>, body: String) -> R {
     };
     let sources: Vec<String> = serde_json::from_value(info["sources"].clone()).unwrap_or_default();
     match st.sources.add(&script, &url, &sources, true) {
-        Ok(id) => { reload_active(&st).await; ok(json!({"success": true, "filename": info["metadata"]["name"], "id": id, "metadata": info["metadata"], "supportedSources": sources, "owner": "open"})) }
+        Ok((id, o)) => { reload_active(&st).await; ok(json!({"success": true, "duplicate": o == AddOutcome::Duplicate, "updated": o == AddOutcome::Updated, "filename": info["metadata"]["name"], "id": id, "metadata": info["metadata"], "supportedSources": sources, "owner": "open"})) }
         Err(e) => ok(json!({"success": false, "error": e.to_string()})),
     }
 }
