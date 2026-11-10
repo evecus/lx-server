@@ -364,7 +364,14 @@ async fn validate_script(st: &AppState, script: &str) -> Result<Value, String> {
     Ok(json!({"valid": true, "metadata": meta, "sources": sources, "sourcesCount": sources.len()}))
 }
 async fn reload_active(st: &AppState) {
-    if let Some((_, s)) = st.sources.enabled_script() { let _ = st.js.load_user(s).await; }
+    match st.sources.enabled_script() {
+        Some((_, s)) => { let _ = st.js.load_user(s).await; }
+        None => { let _ = st.js.unload_user().await; }
+    }
+}
+/// 前端传 sourceId，兼容旧的 id
+fn source_id(v: &Value) -> String {
+    v["sourceId"].as_str().or_else(|| v["id"].as_str()).unwrap_or("").to_string()
 }
 async fn source_validate(State(st): State<AppState>, body: String) -> R {
     let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
@@ -428,17 +435,35 @@ fn regex_lite(s: &str, pat: &str) -> bool { s.contains(pat) }
 async fn source_list(State(st): State<AppState>) -> R { ok(Value::Array(st.sources.enrich())) }
 async fn source_toggle(State(st): State<AppState>, body: String) -> R {
     let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
-    let id = v["id"].as_str().unwrap_or("");
+    let id = source_id(&v);
     let enabled = v["enabled"].as_bool().unwrap_or(true);
-    match st.sources.set_enabled(id, enabled) {
-        Ok(_) => { reload_active(&st).await; ok(json!({"success": true, "enabled": enabled})) }
-        Err(e) => ok(json!({"success": false, "error": e.to_string()})),
+    if !st.sources.list().iter().any(|x| x.id == id) {
+        return ok(json!({"success": false, "error": "音源不存在"}));
     }
+    let prev = st.sources.list();
+    if let Err(e) = st.sources.set_enabled(&id, enabled) {
+        return ok(json!({"success": false, "error": e.to_string()}));
+    }
+    if enabled {
+        // 启用：加载脚本，失败则回滚到启用前的状态
+        let script = st.sources.enabled_script().map(|(_, s)| s).unwrap_or_default();
+        if let Err(e) = st.js.load_user(script).await {
+            let _ = st.sources.restore(prev);
+            reload_active(&st).await;
+            return ok(json!({"success": false, "error": format!("音源加载失败: {}", e)}));
+        }
+    } else {
+        reload_active(&st).await;
+    }
+    ok(json!({"success": true, "enabled": enabled}))
 }
 async fn source_delete(State(st): State<AppState>, body: String) -> R {
     let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
-    let id = v["id"].as_str().unwrap_or("");
-    match st.sources.remove(id) {
+    let id = source_id(&v);
+    if !st.sources.list().iter().any(|x| x.id == id) {
+        return ok(json!({"success": false, "error": "音源不存在"}));
+    }
+    match st.sources.remove(&id) {
         Ok(_) => { reload_active(&st).await; ok(json!({"success": true})) }
         Err(e) => ok(json!({"success": false, "error": e.to_string()})),
     }

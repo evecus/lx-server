@@ -140,6 +140,9 @@ impl SourceStore {
         Ok((id, outcome))
     }
 
+    /// 回滚索引到给定快照
+    pub fn restore(&self, items: Vec<SourceItem>) -> anyhow::Result<()> { self.write(&items) }
+
     pub fn set_enabled(&self, id: &str, enabled: bool) -> anyhow::Result<()> {
         let mut items = self.list();
         if enabled { for x in items.iter_mut() { x.enabled = false; } }

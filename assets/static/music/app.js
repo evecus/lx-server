@@ -6956,8 +6956,10 @@ async function reloadSource(sourceId) {
         });
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const reloadResult = await response.json();
+        if (reloadResult.success === false) throw new Error(reloadResult.error || '重载失败');
 
-        showInfo('正在重新加载...');
+        showSuccess('已重新加载');
         // Wait a bit for server to process
         setTimeout(() => {
             renderCustomSources();
@@ -6994,6 +6996,7 @@ async function toggleSource(sourceId, currentEnabled, allowUnsafeVM = false) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const result = await response.json();
+        if (result.success === false && !result.requireUnsafe) throw new Error(result.error || '操作失败');
 
         // 处理 REQUIRE_UNSAFE_VM
         if (result.requireUnsafe) {
@@ -7039,6 +7042,8 @@ async function deleteSource(sourceId) {
         }
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const delResult = await response.json();
+        if (delResult.success === false) throw new Error(delResult.error || '删除失败');
 
         showSuccess('已删除');
         await renderCustomSources();

@@ -44,6 +44,7 @@ pub enum Cmd {
     Builtin { method: String, args: String, reply: Reply },
     User { data: String, reply: Reply },
     LoadUser { script: String, reply: Reply },
+    UnloadUser { reply: Reply },
 }
 
 #[derive(Clone)]
@@ -63,6 +64,13 @@ impl JsHandle {
             .map_err(|_| "JS 引擎已停止".to_string())?;
         let s = rx.await.map_err(|_| "JS 引擎无响应".to_string())??;
         serde_json::from_str(&s).map_err(|e| format!("音源返回非 JSON: {} | {}", e, &s[..s.len().min(300)]))
+    }
+    /// 卸载当前自定义音源（停用/删除最后一个启用源时调用，避免旧脚本继续生效）
+    pub async fn unload_user(&self) -> Result<(), String> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(Cmd::UnloadUser { reply: tx }).map_err(|_| "JS 引擎已停止".to_string())?;
+        rx.await.map_err(|_| "JS 引擎无响应".to_string())??;
+        Ok(())
     }
     pub async fn load_user(&self, script: String) -> Result<Value, String> {
         let (tx, rx) = oneshot::channel();
@@ -411,6 +419,11 @@ pub fn spawn() -> anyhow::Result<(JsHandle, std::thread::JoinHandle<()>)> {
                         let r = drive(&bus, &rt, &mut ctxs, Sb::User, script, Stop::UserResult, 45_000);
                         let _ = reply.send(r.clone()); r
                     }
+                }
+                Cmd::UnloadUser { reply } => {
+                    ctxs.user = None;
+                    let r: Result<String, String> = Ok("{}".into());
+                    let _ = reply.send(r.clone()); r
                 }
                 Cmd::LoadUser { script, reply } => {
                     let r = (|| -> Result<String, String> {
