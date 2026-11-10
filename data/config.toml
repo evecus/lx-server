@@ -2,7 +2,7 @@
 # 修改后重启生效；环境变量优先级高于本文件。
 
 [server]
-name = "lx-rs"
+name = "lx-server"
 bind_ip = "0.0.0.0"
 port = 9527
 data_dir = "data"

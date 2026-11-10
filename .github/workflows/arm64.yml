@@ -36,13 +36,15 @@ jobs:
 
       - name: Collect artifact
         run: |
-          mkdir dist
-          cp target/aarch64-unknown-linux-musl/release/lx-server dist/lx-server
-          cp -r data dist/data
+          mkdir lx-server
+          cp target/aarch64-unknown-linux-musl/release/lx-server lx-server/lx-server
+          chmod 755 lx-server/lx-server
+          cp -r data lx-server/data
+          tar -czvf lx-server-linux-arm64.tar.gz lx-server
       
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: lx-server-linux-arm64
-          path: |
-            dist/*
+          tag_name: test
+          prerelease: true
+          files: lx-server-linux-arm64.tar.gz

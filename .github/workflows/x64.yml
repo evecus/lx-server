@@ -1,0 +1,50 @@
+name: build linux x64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build-x64-musl:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          key: cargo-musl-x64-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-musl-x64-
+
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build (x86_64-unknown-linux-musl, release)
+        env:
+          CARGO_TARGET_x86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Collect artifact
+        run: |
+          mkdir lx-server
+          cp target/aarch64-unknown-linux-musl/release/lx-server lx-server/lx-server
+          chmod 755 lx-server/lx-server
+          cp -r data lx-server/data
+          tar -czvf lx-server-linux-x64.tar.gz lx-server
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: test
+          prerelease: true
+          files: lx-server-linux-x64.tar.gz
