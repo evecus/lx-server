@@ -1720,12 +1720,21 @@ prefetchManager.init(); // 立即初始化缓冲器
  * 统一的歌曲解析入口，支持播放和预读调用
  * 包含：本地/服务器缓存检查、在线解析、自动降级逻辑
  */
-async function resolveSongUrl(song, quality, isSilent = false, isRetry = false) {
+async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, ctx = null) {
+    ctx = ctx || { origin: quality };
     try {
         const result = await fetchSongUrl(song, quality, isRetry, isSilent);
         if (result.errorMsg) throw new Error(result.errorMsg);
+        // 只在最终成功后提示一次（失败的中间步骤不弹窗）
+        if (!isSilent && ctx.origin !== quality) {
+            const qm = window.QualityManager;
+            showInfo(`已从 ${qm.getQualityDisplayName(ctx.origin)} 降级到 ${qm.getQualityDisplayName(quality)} 播放`);
+        }
         return result;
     } catch (error) {
+        // 没有可用音源：降音质、换源都没有意义，直接失败
+        if (error && (error.noSource || (error.message && error.message.includes('未导入或未启用')))) throw error;
+
         // 区分“平台不支持”和“解析失败”
         const isPlatformNotSupported = error.message && (
             error.message.includes('未找到支持') ||
@@ -1736,23 +1745,23 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false) 
         const nextQuality = isPlatformNotSupported ? null : window.QualityManager.getNextLowerQuality(quality, song);
 
         if (nextQuality) {
-            if (!isSilent) {
-                const fromName = window.QualityManager.getQualityDisplayName(quality);
-                const toName = window.QualityManager.getQualityDisplayName(nextQuality);
-                showInfo(`从 ${fromName} 降级到 ${toName} 播放...`);
-            }
-            return await resolveSongUrl(song, nextQuality, isSilent, true);
+            const fromName = window.QualityManager.getQualityDisplayName(quality);
+            const toName = window.QualityManager.getQualityDisplayName(nextQuality);
+            console.log(`[Resolve] 从 ${fromName} 降级到 ${toName}`);
+            const r = await resolveSongUrl(song, nextQuality, isSilent, true, ctx);
+            return r;
         }
 
-        // 核心增强：如果质量降级也失败了，且开启了自动尝试换源
+        // 质量降级也失败了，且开启了自动尝试换源
         if (settings.enableAutoSwitchSource && !isSilent) {
             console.log(`[AutoSource] 原始源解析失败，准备尝试全网匹配: ${song.name}`);
             const matchedSong = await findOtherSourceMatch(song);
             if (matchedSong) {
-                showInfo(`找到备选源，尝试从 ${getSourceName(matchedSong.source)} 播放...`);
-                // 递归调用，但不再允许再次换源（避免死循环），且 fallback 到备选歌曲的最佳音质
+                console.log(`[AutoSource] 找到备选源: ${getSourceName(matchedSong.source)}`);
                 const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || '320k');
-                return await fetchSongUrl(matchedSong, bestNextQuality, true, isSilent);
+                const r = await fetchSongUrl(matchedSong, bestNextQuality, true, isSilent);
+                showInfo(`原音源失败，已改用 ${getSourceName(matchedSong.source)} 播放`);
+                return r;
             }
         }
 
@@ -1776,7 +1785,6 @@ async function findOtherSourceMatch(song) {
             headers['x-user-name'] = currentListData.username;
         }
 
-        showInfo('正在自动尝试换源匹配...');
 
         // 仅在主流源中搜索
         const searchSources = ['kw', 'kg', 'tx', 'wy', 'mg'].filter(s => s !== song.source);
@@ -1933,15 +1941,12 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
     const reqId = Math.random().toString(36).slice(2) + Date.now().toString(36);
     let progressEs = null;
     try {
+        // 每次解析尝试的进度只写控制台，不再逐条弹窗（避免失败时刷屏）
         progressEs = new EventSource(`/api/music/progress?reqId=${reqId}`);
         progressEs.onmessage = (e) => {
-            if (isSilent) return;
             try {
                 const attempt = JSON.parse(e.data);
-                const songNamePrefix = attempt.name || song.name || '';
-                const msg = `[${songNamePrefix}] ${attempt.message || (attempt.status === 'success' ? '解析成功' : '解析失败')}`;
-                if (attempt.status === 'success') showSuccess(msg);
-                else showError(msg);
+                console.log(`[Resolve] ${attempt.name || song.name || ''}: ${attempt.message || attempt.status}`);
             } catch (_) { }
         };
     } catch (_) { }
@@ -1967,7 +1972,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
                 result = await res.json();
                 if (result.error) errorMsg = result.error;
             } catch (e) { }
-            throw { message: errorMsg, attempts: result.attempts };
+            throw { message: errorMsg, attempts: result.attempts, noSource: errorMsg.includes('未导入或未启用') };
         }
 
         const result = await res.json();
@@ -1992,6 +1997,9 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
                 sourceName: result.sourceName,
                 errorMsg: result.errorMsg
             };
+        }
+        if (result.error) {
+            throw { message: result.error, attempts: result.attempts, noSource: String(result.error).includes('未导入或未启用') };
         }
         throw new Error('服务器未返回播放链接');
     } finally {
@@ -2457,18 +2465,11 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         console.error('[Player] Error:', error);
 
         setPlayerStatus('播放失败');
-        showError(`播放失败: ${error.message || '未知错误'}`);
+        const failMsg = (error && error.noSource) ? '播放失败：尚未导入音源，请先到 设置 → 自定义源 导入' : `播放失败: ${error.message || '未知错误'}`;
+        showError(failMsg);
 
-        // 区分“平台不支持”错误
-        const isPlatformNotSupported = error.message && (
-            error.message.includes('未找到支持') ||
-            error.message.includes('not supported')
-        );
-
-        if (settings.enableAutoSkipOnError || isPlatformNotSupported) {
-            if (window._autoSkipTimer) clearTimeout(window._autoSkipTimer);
-            window._autoSkipTimer = setTimeout(() => playNext(), isPlatformNotSupported ? 2000 : 3000);
-        }
+        // 失败后直接停止，不自动切歌（降音质/换源已在解析阶段尝试过）
+        if (window._autoSkipTimer) { clearTimeout(window._autoSkipTimer); window._autoSkipTimer = null; }
         updatePlayButton(false);
     } finally {
         if (currentLoadingRequestId === thisRequestId) {

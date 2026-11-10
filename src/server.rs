@@ -256,6 +256,10 @@ async fn music_url(State(st): State<AppState>, headers: HeaderMap, body: String)
         Err(e) => attempts.push(json!({"name": "内置SDK", "status": "fail", "message": e})),
     }
     let _ = headers;
+    // 没有启用任何自定义音源：给出明确提示，前端据此直接停止，不再降音质/换源/切歌
+    if st.sources.enabled_script().is_none() {
+        return Err(err("未导入或未启用任何音源脚本"));
+    }
     Err(err(format!("未找到 {} 平台的可用播放链接", source)))
 }
 
